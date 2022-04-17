@@ -1,14 +1,19 @@
 package handlers
 
 import (
-	"io/ioutil"
+	"bufio"
+	"encoding/csv"
+	"io"
 	"log"
 	"net/http"
+	"strings"
+
+	"github.com/analysis-finance/internal/entitys"
 )
 
-type File struct {
-	Name string
-	Size int
+type templateUpload struct {
+	Csv      *entitys.Csv
+	ErrorMsg string
 }
 
 // HandleUpload é responsalvel por realizar o upload de arquivos
@@ -20,62 +25,67 @@ func HandleUpload(w http.ResponseWriter, r *http.Request) {
 
 		// retorna o primeiro arquivo com o nome especificado no formulario
 		file, headers, err := r.FormFile("uploadFile")
-		if headers == nil {
-			http.Redirect(w, r, "/", http.StatusMovedPermanently)
-		}
-
 		if err != nil {
-			log.Printf("%v: %v",
-				_errorRetrievingFile,
-				err,
-			)
+			log.Printf("%v: %v", _errRetrievingFile, err)
 			return
 		}
 		defer file.Close()
 
-		// cria um arquivo temporário no diretorio uploads
-		tempFile, err := ioutil.TempFile("/tmp", "upload-*.csv")
-		if err != nil {
-			log.Printf("%v: %v, name: %s",
-				_errorCreateingTempFile,
-				err,
-				headers.Filename,
-			)
-		}
-		defer tempFile.Close()
+		tmp := &templateUpload{}
 
-		// faz a leitura dos bytes do arquivo de upload
-		fileBytes, err := ioutil.ReadAll(file)
-		if err != nil {
-			log.Printf("%v: %v, name:%s",
-				_errorReadingFile,
-				err,
-				headers.Filename,
-			)
+		if headers == nil {
+			http.Redirect(w, r, "/", http.StatusMovedPermanently)
+		} else if headers.Header["Content-Type"][0] != "text/csv" {
+			log.Printf("error:%v", ErrorMsgInvalidType)
+
+			tmp.ErrorMsg = ErrorMsgs[ErrorMsgInvalidType]
+			home.ExecuteTemplate(w, "Home", tmp)
+			return
 		}
 
-		// escreve no arquivo temporário
-		tempFile.Write(fileBytes)
-		// return that we have successfully uploaded our file!
-		log.Printf("successfully: upload, name:%s",
-			headers.Filename,
-		)
-
-		infoFile := &File{
-			Name: headers.Filename,
-			Size: toMegabytes(int(headers.Size)),
+		if err := readCsv(file); err != nil {
+			log.Printf("%v:%v", _errReadingFile, err)
 		}
 
-		log.Printf("fileName: %+v\n", infoFile.Name)
-		log.Printf("fileSize: %+v\n", infoFile.Size)
+		tmp.Csv = entitys.NewCsv(headers.Filename, headers.Size)
+		tmp.Csv.ConvertSizeToMB()
 
-		home.ExecuteTemplate(w, "Home", infoFile)
+		log.Printf("successfully upload: 'name':%v,'size':%v", tmp.Csv.Name, tmp.Csv.Size)
+		home.ExecuteTemplate(w, "Home", tmp)
 	}
-
-	http.Redirect(w, r, "/", http.StatusMovedPermanently)
 
 }
 
-func toMegabytes(size int) int {
-	return size / 1024
+func readCsv(file io.Reader) error {
+	reader := bufio.NewReader(file)
+	var lineCount int64
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			return err
+		}
+
+		if lineCount == 0 {
+			lineCount++
+			continue
+		}
+		lineCount++
+
+		r := csv.NewReader(strings.NewReader(string(line)))
+		r.Comma = ','
+		records, err := r.ReadAll()
+		if err != nil {
+			return err
+		}
+
+		for _, row := range records {
+			log.Println(row)
+		}
+	}
+	return nil
 }

@@ -5,7 +5,7 @@ import (
 	"net/http"
 )
 
-var home = template.Must(template.ParseGlob("app/web/home.html"))
+var home = template.Must(template.ParseGlob("app/views/home.html"))
 
 // HandleHome retorna a página inicial de upload de arquivos
 func HandleHome(w http.ResponseWriter, r *http.Request) {
